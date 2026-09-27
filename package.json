@@ -1,0 +1,23 @@
+{
+  "name": "evolutioner-mk1",
+  "version": "1.0.0",
+  "description": "Modular reasoning harness, RLVR verification engine and MCTS test-time-compute scaling for small-footprint local LLMs (wallpillar-lm portfolio).",
+  "license": "MIT",
+  "scripts": {
+    "setup": "bash setup.sh",
+    "run": "PYTHONPATH=src env/bin/python -m evolutioner.cli query '2+2?' --no-rag",
+    "selftest": "PYTHONPATH=src env/bin/python -m evolutioner.cli selftest",
+    "test": "PYTHONPATH=src env/bin/python -m unittest discover -s tests -v",
+    "lint": "env/bin/python -m compileall -q src tests"
+  },
+  "models": {
+    "organization": "wallpillar-lm",
+    "variants": {
+      "1.5B": "evolutionermk1-1.5b-q4_k_m.gguf",
+      "2B": "evolutionermk1-2b-q4_k_m.gguf",
+      "3B": "evolutionermk1-3b-q4_k_m.gguf",
+      "5B": "evolutionermk1-5b-q4_k_m.gguf"
+    }
+  },
+  "keywords": ["mcts", "rlvr", "test-time-compute", "llama-cpp", "gguf", "wallpillar-lm"]
+}

@@ -1,0 +1,5 @@
+llama-cpp-python>=0.3.0
+sympy>=1.13.3
+huggingface_hub>=0.26.0
+requests>=2.32.0
+textual>=1.0.0
