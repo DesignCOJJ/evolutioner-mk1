@@ -1,6 +1,6 @@
 # EvolutionMK1 🧬⚡
 
-> **Wall-Pillar.lm's flagship evolutionary search harness and synthetic trajectory engine.**
+> **WallPillar-LM's flagship evolutionary search harness and synthetic trajectory engine.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Organization](https://img.shields.io/badge/Org-Wall--Pillar.lm-black)](https://github.com/wall-pillar)
