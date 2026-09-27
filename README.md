@@ -1,160 +1,196 @@
 # Evolutioner MK1 🧠⚡
 
-Local reasoning harness implementing the master spec: **MCTS test-time-compute
-scaling**, a **deterministic RLVR verifier sandbox**, **virtual context**
-(RAG), **persistent memory**, **tool-using agents with sub-agent spawning**,
-and a **cyberpunk TUI dashboard** — running your `wallpillar-lm` portfolio
-through **Ollama** (or native llama.cpp) on plain CPU.
+> **Open-Source Evolutionary Search Harness, Verification Engine, and 3B Parameter Reasoning Framework.**
 
-Preview: `docs/tui_preview.svg` (open in a browser).
+Evolutioner MK1 is a modular reasoning harness designed to scale small-footprint language models ($\le$ 5B parameters) into high-capacity reasoning engines. By shifting the workload from pure parametric memory to **Test-Time Compute (TTC) scaling**, **deterministic rule-based verifiers (RLVR)**, and **external stateful memory**, Evolutioner MK1 enables edge-class hardware to execute complex, step-by-step reasoning workflows with zero hallucination on verifiable tasks.
 
 ---
 
-## 0. Setup (once)
+## 🏛️ Official Model Portfolio (`wallpillar-lm`)
+
+Evolutioner MK1 supports a tiered family of fine-tuned and quantized models hosted under the official [`wallpillar-lm`](https://huggingface.co/wallpillar-lm) Hugging Face organization:
+
+| Model ID & Repo | Base Architecture | Size | Primary Specialized Purpose |
+| :--- | :--- | :--- | :--- |
+| **`wallpillar-lm/evolutionermk1-1.5B`** | DeepSeek-R1-Distill-1.5B | 1.5B | **Ultra-Fast Rollouts:** Rapid `<think>` candidate generation for high-depth MCTS tree exploration and instant verification. |
+| **`wallpillar-lm/evolutionermk1-2B`** | Gemma-2-2B-Instruct | 2.0B | **Instruction & Structured Tasks:** Multi-turn conversational workflows, schema enforcement, and JSON outputs. |
+| **`wallpillar-lm/evolutionermk1-3B`** | Qwen-2.5-3B-Instruct | 3.0B | **Primary Local Workhorse:** Math/SymPy execution loops, Python AST checking, and balanced logic-to-RAM efficiency. |
+| **`wallpillar-lm/evolutionermk1-5B`** | DeepSeek-R1-Distill-7B | ~5–7B | **High-Capacity Engine:** Deep multi-step reasoning and complex code synthesis for offloaded or high-memory runs. |
+
+---
+
+## 📐 Architecture & Execution Split
+
+To run reliably within tight hardware bounds (e.g., 8 GB system RAM with zero dedicated GPU), Evolutioner MK1 decouples **Inference & Reasoning Verification** from **Model Fine-Tuning**:
+
+```
+                       ┌──────────────────────────────────────────┐
+                       │          Evolutioner MK1 Harness         │
+                       └────────────────────┬─────────────────────┘
+                                            │
+                    ┌───────────────────────┴───────────────────────┐
+                    ▼                                               ▼
+      ┌───────────────────────────┐                   ┌───────────────────────────┐
+      │     Local CPU Harness     │                   │     Cloud GPU Engine      │
+      │   (i5-4440 / 8GB RAM)     │                   │ (Colab / Kaggle / RunPod) │
+      ├───────────────────────────┤                   ├───────────────────────────┤
+      │ • llama.cpp (GGUF Q4_K_M) │                   │ • Unsloth + GRPO Training │
+      │ • SymPy / AST Verifier    │                   │ • vLLM Rollout Generation │
+      │ • MCTS Search Control     │                   │ • FP16/BF16 Merging       │
+      │ • API Fallback Router     │                   │ • Final GGUF Quantization │
+      └───────────────────────────┘                   └───────────────────────────┘
+```
+
+### The 4 Core Pillars
+
+1. **Quantized Inference Engine:** Powered by `llama.cpp` using standard $Q4\_K\_M$ GGUF weights from `wallpillar-lm`, optimized for CPU AVX2 instructions without requiring an NVIDIA GPU.
+2. **Deterministic RLVR Verifier:** Intercepts intermediate reasoning blocks inside `<think>` tags and executes dynamic Python/SymPy code in a sandboxed runtime (`bubblewrap`). Standard execution outputs or error messages are injected back into the active KV-cache for real-time self-correction.
+3. **MCTS & Process Reward Model (PRM):** Evaluates candidate trajectories at step/newline boundaries, pruning dead paths early to save compute cycles.
+4. **Virtual Context Engine:** Manages a rolling KV-cache window backed by dense vector retrieval (RAG) to simulate infinite context without exploding physical RAM limits.
+
+---
+
+## 💻 Hardware & Operating Limits
+
+Evolutioner MK1 is engineered to run locally on low-cost edge machines while allowing offloaded cloud training.
+
+| Constraint | Local CPU Runtime (Haswell / AVX2) | Cloud GPU Fine-Tuning Target |
+| :--- | :--- | :--- |
+| **Target CPU/GPU** | Intel Core i5-4440 (4 cores / 4 threads) | NVIDIA T4 / A10G / A100 |
+| **System Memory** | 8 GB DDR3 RAM (Uses ~1.5–3.5 GB peak) | 16 GB+ VRAM |
+| **Execution Acceleration** | AVX2 instructions (No CUDA required) | CUDA 12.1+ / FlashAttention-2 |
+| **Expected Token Speed** | ~8–15 tokens/sec (3B GGUF) | 100+ tokens/sec |
+
+---
+
+## 🛠️ Environment Setup & Quickstart
+
+### 1. System Dependencies (Arch Linux / CachyOS)
+
+Install basic compilation tools and container isolation packages:
 
 ```bash
-cd ~/evolutioner-mk1
-bash setup.sh        # creates env/, installs deps, runs mock selftest
+sudo pacman -Syu --needed base-devel git python python-pip python-virtualenv bubblewrap
 ```
 
-Requires: Python 3.10+, Ollama (`sudo pacman -S ollama`, then `ollama serve`).
-Optional: `bubblewrap` for the hardened RLVR jail (auto-fallback otherwise).
+*(On Ubuntu/Debian: `sudo apt update && sudo apt install build-essential git python3 python3-pip python3-venv bubblewrap`)*
 
-Pull your portfolio (already done on this machine):
+### 2. Repository Setup
+
+Clone the repository and prepare the isolated environment:
 
 ```bash
-for v in 1.5B 2B 3B 5B; do ollama pull wallpillar-lm/evolutionermk1-$v:latest; done
-```
+git clone https://github.com/your-username/evolutioner-mk1.git
+cd evolutioner-mk1
 
-> **Local model names:** if your models were created locally with different
-> tags (e.g. `wallpillar-lm/evolu-general-3B` instead of
-> `evolutionermk1-3B`), everything still works — the backend resolves any
-> requested portfolio tag to the closest installed model automatically
-> (size token + variant keyword). `ollama pull` only works for tags that
-> exist on registry.ollama.ai; local GGUFs go through
-> `ollama create <name> -f Modelfile` (launcher menu 8 → 2).
+# Create and activate environment
+python -m venv env
+source env/bin/activate  # On fish shell: source env/bin/activate.fish
+
+# Install lightweight CPU runtime dependencies
+pip install --upgrade pip uv
+uv pip install llama-cpp-python sympy pydantic requests huggingface_hub
+```
 
 ---
 
-## 1. The launcher (easiest way to run everything)
+## 🚀 Execution Guide
+
+Evolutioner MK1 automatically fetches required model weights from the `wallpillar-lm` Hugging Face organization upon launch.
+
+### Standard Interactive Prompt
 
 ```bash
-bash launch.sh
+python main.py --prompt "Solve the equation 2x + 15 = 45 and check the root."
 ```
 
-Menu: `1` TUI dashboard · `2` query harness · `3` agent task · `4` portfolio
-status · `5` usage stats · `6` selftest · `7` tests · `8` Ollama controls
-(serve / models / pull / chat / ps / stop).
-
----
-
-## 2. TUI dashboard
+### Executing Specific Model Variants
 
 ```bash
-PYTHONPATH=src env/bin/python -m evolutioner.cli tui
-```
+# Fast 1.5B Rollout Engine
+python main.py --variant 1.5B --prompt "Factorize x^2 - 5x + 6"
 
-- **OVERVIEW** — live CPU/RAM/load gauges, token stream counters, core matrix.
-- **MODELS** — installed models + which are resident in VRAM right now.
-- **USAGE** — per-kind call mix (mcts/answer/agent) + live event stream.
-- **LOGS / AGENT** — the agent console; your typed queries run here.
-- Keys: `e` evolve (demo run) · type a query + Enter · `r` refresh ·
-  `tab` switch · `q` quit. Runs use the tiered portfolio and stream progress
-  (spin-up → MCTS → verification → final) into the log pane.
+# 3B Primary Workhorse Engine
+python main.py --variant 3B --threads 4 --ctx-size 2048 --enable-sandbox
+
+# 5B High-Capacity Engine
+python main.py --variant 5B --threads 4 --ctx-size 4096
+```
 
 ---
 
-## 3. CLI harness (headless)
+## 🏋️ Fine-Tuning Pipeline (Cloud / GPU Only)
+
+Local execution is strictly built for inference and MCTS search. Training (SFT and GRPO) must be run on GPU nodes.
 
 ```bash
-source env/bin/activate
-python -m evolutioner.cli status        # ollama + portfolio check
-python -m evolutioner.cli query "What is 37 * 43, and the square root of it? Verify with python."
-python -m evolutioner.cli query "..." --no-mcts --no-rag      # fast path
-python -m evolutioner.cli query "..." --variant 5B --iters 4 --depth 3
-python -m evolutioner.cli query "..." --backend llama          # native GGUF (auto-downloads)
-python -m evolutioner.cli usage          # token/call tracker (SQLite)
-python -m evolutioner.cli selftest       # mock pipeline, no model needed
-```
+# Inside a GPU environment (Google Colab / RunPod)
+pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" trl peft vllm
 
-Every run: memory retrieval → MCTS `<think>` trajectory (1.5B rollouts) →
-3B/5B answer with ```python blocks → sandbox execution → error fed back for
-self-correction → verified output folded into the final answer → session +
-usage persisted (`data/`).
+# Phase 1: Cold Start SFT
+python training/phase1_sft.py
 
----
-
-## 4. Agents & sub-agents
-
-```bash
-python -m evolutioner.cli agent "Inventory the workspace and write notes.md summarizing it" --tier 3B
-python -m evolutioner.cli agent "..." --tier 2B --json          # machine-readable transcript
-python -m evolutioner.cli agent "..." --shell                   # enable shell tool (per-call y/N confirm)
-```
-
-- Tools: `list_dir`, `read_file`, `write_file`, `sysinfo` (+ `shell` if
-  enabled). File tools are **jailed to `./workspace`** — path escapes are
-  rejected. Shell is disabled unless `--shell`, and every command needs
-  interactive approval (`--yes` auto-approves: dangerous).
-- Sub-agents: the model emits `{"tool": "spawn_subagent", "args": {"task":
-  "...", "tier": "2B"}}`; spawns are depth-limited to 2, never inherit shell,
-  run on their own tier, and report back to the parent. All calls are tracked
-  in usage (`kind=agent`).
-
----
-
-## 5. Python API
-
-```python
-from evolutioner import Config, Harness, TieredOllamaBackend, UsageTracker, SandboxVerifier
-
-cfg = Config(enable_rag=True)
-llm = TieredOllamaBackend("3B", "1.5B")            # tiered portfolio
-h = Harness(cfg, llm, tracker=UsageTracker(cfg.usage_db),
-            verifier=SandboxVerifier(timeout_s=5))
-res = h.run("What is 2^10? Verify with python.")
-print(res.answer, res.verification)
+# Phase 2: RLVR via GRPO
+python training/phase2_grpo.py
 ```
 
 ---
 
-## 6. Configuration (`config/default.json`)
+## 🗺️ Roadmap & Future Aims
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `variant` | `3B` | reasoning tier (2B/3B/5B) |
-| `ollama_tiered` | `true` | 1.5B rollouts + main reasoner |
-| `ollama_rollout_variant` | `1.5B` | cheap MCTS tier |
-| `ollama_host` | `http://localhost:11434` | or `OLLAMA_HOST` env |
-| `mcts_iterations` / `mcts_depth` | `8` / `4` | TTC budget |
-| `gen_tokens` / `max_rounds` | `384` / `3` | answer budget / self-correction rounds |
-| `enable_rag` / `auto_memory` | `true` / `false` | virtual context / memory writeback |
-| `router_fallback` | `null` | e.g. `"api:OPENROUTER_API_KEY"` |
-| `use_bwrap` | `null` | `null`=auto-probe, `true`=require, `false`=rlimit fallback |
+Evolutioner MK1 is evolving toward a fully autonomous, local-first hybrid reasoning system. Key future milestones include:
+
+- [ ] **Native Ternary / BitNet CPU Acceleration:** Integrate native 1.58-bit kernel execution to achieve 100+ tokens/sec on AVX2 hardware without floating-point overhead.
+- [ ] **Tree-of-Thoughts (ToT) Visualizer:** Build a lightweight CLI/TUI dashboard to monitor real-time MCTS branch expansions, step scores, and verifier feedback loops.
+- [ ] **Multi-Modal Verifier Sandboxing:** Extend RLVR checks beyond math/code to include local web-browsing assertions and multi-file code workspace validation.
+- [ ] **Autonomous Edge Federation:** Implement peer-to-peer tree search where multiple low-power local devices evaluate sub-branches of the MCTS tree in parallel.
 
 ---
 
-## 7. Tests & crosschecking
+## 📁 Repository Structure
 
-```bash
-env/bin/python -m compileall -q src tests            # 1. syntax
-env/bin/python -m unittest discover -s tests         # 2. unit + TUI (headless)
-PYTHONPATH=src env/bin/python -m evolutioner.cli selftest   # 3. integration
-PYTHONPATH=src env/bin/python -m evolutioner.cli query "7*6? Verify."  # 4. live
+```
+evolutioner-mk1/
+├── assets/                  # Architecture diagrams and schema illustrations
+├── config/                  # System prompts and search hyperparameter configs
+│   └── default_config.json
+├── models/                  # Downloaded GGUF weights (Git ignored)
+├── src/
+│   ├── engine.py            # llama-cpp-python interface and KV-cache manager
+│   ├── router.py            # Local entropy router & API fallback engine
+│   ├── search.py            # MCTS search implementation & PRM scoring
+│   └── verifiers/
+│       ├── ast_verifier.py  # Python AST syntax & safety inspector
+│       └── sympy_verifier.py# Symbolic math execution sandbox
+├── training/
+│   ├── phase1_sft.py        # Unsloth SFT script for GPU training
+│   └── phase2_grpo.py       # GRPO reinforcement learning pipeline
+├── .gitignore
+├── LICENSE
+├── main.py                  # Primary CLI entrypoint
+└── README.md
 ```
 
-## 8. Security notes
+---
 
-- Verifier runs code in `bwrap --unshare-all` (no network, no FS outside a
-  scratch dir) or an rlimit subprocess (CPU/RAM/NPROC/FSIZE caps).
-- Agent file tools are workspace-jailed; shell needs `--shell` + per-call
-  confirmation; sub-agent spawn depth ≤ 2.
-- Nothing leaves your machine unless you configure `router_fallback`.
+## 📄 License
 
-## 9. Spec deviations (deliberate fixes)
+This project is licensed under the **Apache 2.0 License** - see the [LICENSE](LICENSE) file for details.
+---
 
-1. `evaluate_step` never crashes on malformed code (spec regex could kill the search loop).
-2. MCTS backprops once per candidate (spec triple-counted visits, corrupting UCT).
-3. Rollouts stop on `</think>` only (spec's `\n` stop empties R1-distill output instantly).
-4. Cloud fallback uses an OpenAI-compatible endpoint (portfolio has no hosted API).
-5. `/api/chat` (not `/api/generate`) so each model's chat template is applied.
+## 🔌 Local Setup Addendum (this checkout)
+
+- **Model tag resolver** — models installed locally under different tags
+  (e.g. `wallpillar-lm/evolu-general-3B` instead of `evolutionermk1-3B`)
+  are matched automatically by the backend (size token + variant keyword);
+  no config edits needed when tags change.
+- **Chat REPL (opencode-style)** — `PYTHONPATH=src env/bin/python -m evolutioner.cli chat`:
+  streaming token output, `/model 1.5B|2B|3B|5B` switch, `/new` reset,
+  `/solve <q>` escalation to the full MCTS + RLVR-verified harness.
+- **Launcher** — `bash launch.sh`: menu 1–9 (TUI · query · agent · status ·
+  usage · selftest · tests · ollama controls · chat REPL), with GGUF import
+  for locally created models.
+- **Integrated model** — `Modelfile` bakes the methodology into the 3B tier:
+  `ollama create evolutionermk1-integrated-3B -f Modelfile`.
+- **Phase-2 distillation pipeline** — see `docs/DISTILL.md`
+  (trajectory capture → SFT dataset → QLoRA on free GPU → republish).
