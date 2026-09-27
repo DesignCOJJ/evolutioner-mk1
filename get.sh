@@ -102,12 +102,18 @@ fi
 
 # ── 5. verify ────────────────────────────────────────────────────────────────
 step "5/5 verify"
-env/bin/python -m evolutioner.cli selftest || warn "selftest reported failures — see above"
+SELFTEST=0
+if env/bin/python -m evolutioner.cli selftest; then SELFTEST=1; else warn "selftest reported failures — see above"; fi
 printf "\n"
 env/bin/python -m evolutioner.cli status || true
 
 printf "\n"
-printf "${G}  ✔ Evolutioner MK1 is ready.${N}\n"
+if [ "$SELFTEST" = "1" ]; then
+  printf "${G}  ✔ Evolutioner MK1 is ready.${N}\n"
+else
+  printf "${R}  ✘ install incomplete${N} ${D}(most common cause: missing deps — re-run without SKIP_DEPS)${N}\n"
+  exit 1
+fi
 printf "    Run it:         bash launch.sh          (menu 1–9)\n"
 printf "    Chat REPL:      menu 9   ·   /solve <q> = full MCTS + verified harness\n"
 printf "    Headless:       PYTHONPATH=src env/bin/python -m evolutioner.cli query \"7*6? Verify.\"\n"
