@@ -1,6 +1,6 @@
 {
   "name": "evolutioner-mk1",
-  "version": "1.0.0",
+  "version": "1.12.2",
   "description": "Modular reasoning harness, RLVR verification engine and MCTS test-time-compute scaling for small-footprint local LLMs (wallpillar-lm portfolio).",
   "license": "MIT",
   "scripts": {

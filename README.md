@@ -178,6 +178,29 @@ evolutioner-mk1/
 This project is licensed under the **Apache 2.0 License** - see the [LICENSE](LICENSE) file for details.
 ---
 
+## 📦 Model Inventory (local Ollama store — NOT published, reference only)
+
+The portfolio models live in your **local Ollama store** (~20 GB total) and are
+**deliberately not published** with this repo. The tag resolver (below) maps
+canonical portfolio names onto whatever tags you actually have. Current local
+inventory on the reference machine:
+
+| Local Ollama tag | Size | Role |
+| --- | --- | --- |
+| `wallpillar-lm/evolu-general-1.5B` | 1.1 GB | Ultra-fast MCTS rollouts (1.5B tier) |
+| `wallpillar-lm/evolu-general-2B` | 1.6 GB | Instruction / structured tasks (2B tier) |
+| `wallpillar-lm/evolu-general-3B` | 1.9 GB | **Primary reasoner** (3B tier, default) |
+| `wallpillar-lm/evolu-general-5B` | 4.7 GB | Deep reasoning (5B tier) |
+| `wallpillar-lm/evolu-coder-1.5B` | 986 MB | Code-specialized rollouts (1.5B) |
+| `wallpillar-lm/evolu-coder-3B` | 1.9 GB | Code-specialized reasoner (3B) |
+| `wallpillar-lm/evolu-uncens-3B` | 2.2 GB | Uncensored variant (3B) |
+| `wallpillar-lm/evolu-uncens-r1-1.5B` | 3.6 GB | Uncensored R1-distill (1.5B) |
+| `wallpillar-lm/evolu-integrated-3B` | 1.9 GB | **Methodology-integrated** build (Modelfile) |
+
+> These were created locally via `ollama create` from local GGUFs; none are on
+> registry.ollama.ai or Hugging Face. Recreate yours with `get.sh` (auto-creates
+> the integrated build) or launcher menu 8 → 2 (GGUF import).
+
 ## 🔌 Local Setup Addendum (this checkout)
 
 - **Model tag resolver** — models installed locally under different tags

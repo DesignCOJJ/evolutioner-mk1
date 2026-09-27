@@ -121,10 +121,35 @@ def _chat_repl(config: Config) -> int:
                        duration_s=total_s)
         return "".join(chunks)
 
-    print(f"{CY}evolutioner chat{NC} {DIM}· {tag} · type /help for commands{NC}")
+    # persistent history: sessions saved as JSON after every turn, input
+    # history via readline (up-arrow across restarts)
+    from pathlib import Path
+    import time as _time
+
+    sessions_dir = Path(config.session_dir) / "chat"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    session_id = _time.strftime("%Y%m%d-%H%M%S")
+    session_file = sessions_dir / f"{session_id}.json"
+
+    def _save_session() -> None:
+        session_file.write_text(json.dumps({
+            "id": session_id, "model": tag,
+            "saved_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+            "messages": history,
+        }, indent=1), encoding="utf-8")
+
+    hist_file = sessions_dir / "input_history"
+    try:
+        import readline
+        if hist_file.exists():
+            readline.read_history_file(str(hist_file))
+    except Exception:
+        pass
+
+    print(f"{CY}evolutioner chat{NC} {DIM}· {tag} · session {session_id} · /help for commands{NC}")
     while True:
         try:
-            line = input(f"{GRN}❯{NC} ").strip()
+            line = input("❯ ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -139,11 +164,66 @@ def _chat_repl(config: Config) -> int:
                 print("  /new              clear conversation history")
                 print("  /model <v>        switch variant (1.5B/2B/3B/5B)")
                 print("  /solve <question> run the FULL harness: MCTS + sandbox verification")
+                print("  /history [n]      show recent exchanges (default 10)")
+                print("  /sessions         list saved chat sessions")
+                print("  /resume [id]      load a previous session into context")
+                print("  /save             force-save the session now")
                 print("  /exit             quit (ctrl-d also works)")
                 continue
             if cmd == "/new":
                 history.clear()
-                print(f"{DIM}context cleared{NC}")
+                session_id = _time.strftime("%Y%m%d-%H%M%S")
+                session_file = sessions_dir / f"{session_id}.json"
+                print(f"{DIM}context cleared · new session {session_id}{NC}")
+                continue
+            if cmd == "/history":
+                n = int(arg) if arg.strip().isdigit() else 10
+                shown = 0
+                for msg in reversed(history):
+                    who = f"{GRN}❯{NC}" if msg["role"] == "user" else f"{CY}◂{NC}"
+                    print(f"{who} {msg['content'][:200]}")
+                    shown += 1
+                    if shown >= n * 2:
+                        break
+                if shown == 0:
+                    print(f"{DIM}(empty session){NC}")
+                continue
+            if cmd == "/sessions":
+                files = sorted(sessions_dir.glob("*.json"))
+                if not files:
+                    print(f"{DIM}(no saved sessions){NC}")
+                    continue
+                for f in files[-10:]:
+                    try:
+                        data = json.loads(f.read_text(encoding="utf-8"))
+                        print(f"  {data.get('id', f.stem)}  {DIM}{data.get('model', '?')} · {len(data.get('messages', []))} msgs · {data.get('saved_at', '?')}{NC}")
+                    except Exception:
+                        continue
+                continue
+            if cmd == "/resume":
+                files = sorted(sessions_dir.glob("*.json"))
+                if not files:
+                    print(f"{DIM}(no saved sessions){NC}")
+                    continue
+                target = arg.strip()
+                if not target:
+                    for f in files[-10:]:
+                        print(f"  {f.stem}")
+                    target = input("session id (blank = latest): ").strip() or files[-1].stem
+                path = sessions_dir / (target if target.endswith(".json") else f"{target}.json")
+                if not path.exists():
+                    print(f"{DIM}no such session: {target}{NC}")
+                    continue
+                data = json.loads(path.read_text(encoding="utf-8"))
+                history.clear()
+                history.extend(data.get("messages", []))
+                session_id = path.stem
+                session_file = path
+                print(f"{DIM}resumed {session_id} ({len(history)} messages){NC}")
+                continue
+            if cmd == "/save":
+                _save_session()
+                print(f"{DIM}saved → {session_file}{NC}")
                 continue
             if cmd == "/model":
                 arg = arg.strip().upper()
@@ -194,7 +274,15 @@ def _chat_repl(config: Config) -> int:
             history.pop()
             continue
         history.append({"role": "assistant", "content": reply})
+        _save_session()
 
+    _save_session()
+    try:
+        import readline
+        readline.set_history_length(1000)
+        readline.write_history_file(str(hist_file))
+    except Exception:
+        pass
     tracker.close()
     return 0
 
