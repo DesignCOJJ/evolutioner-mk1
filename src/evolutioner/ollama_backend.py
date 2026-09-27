@@ -58,18 +58,26 @@ def resolve_model_tag(requested: str, host: Optional[str] = DEFAULT_HOST) -> str
     if requested in installed:
         pass
     elif installed:
-        base = requested.split(":")[0].lower()
-        size_m = re.search(r"(1\.5b|2b|3b|5b)$", base)
+        # probe string covers both forms:
+        #   "wallpillar-lm/evolu-vision-3B:latest" -> name carries size/keyword
+        #   "EvoluMK1:vision-3B"                   -> tag carries size/keyword
+        name_part, _, tag_part = requested.partition(":")
+        base = name_part.lower()
+        probe = f"{name_part}-{tag_part}".lower()
+        size_m = re.search(r"(1\.5b|2b|3b|4b|5b)(?=$|[-:])", probe)
         size = size_m.group(1) if size_m else None
-        kw = next((t for t in ("coder", "general", "uncens", "integrated") if t in base), None)
+        kw = next((t for t in ("coder", "general", "uncens", "integrated", "vision", "agentic") if t in probe), None)
         best, best_score = None, -1
         for name in installed:
-            nl = name.split(":")[0].lower()
-            token = nl.rsplit("-", 1)[-1]  # e.g. "general-5b" -> "5b"
+            nl, _, ctag = name.partition(":")
+            nl = nl.lower()
+            cand = f"{nl}-{ctag}".lower()
+            token = nl.rsplit("-", 1)[-1]        # e.g. "general-5b" -> "5b"
+            token_tag = cand.rsplit("-", 1)[-1]  # e.g. "evolumk1:vision-3b" -> "3b"
             if size:
-                if token == size:
+                if token == size or token_tag == size:
                     score = 3  # exact variant token ("1.5b" never matches "5b")
-                elif nl.endswith(size) and not (size == "5b" and "1.5b" in nl):
+                elif (nl.endswith(size) or cand.endswith(size)) and not (size == "5b" and "1.5b" in cand):
                     score = 1  # fuzzy suffix fallback
                 else:
                     continue
@@ -78,8 +86,8 @@ def resolve_model_tag(requested: str, host: Optional[str] = DEFAULT_HOST) -> str
                     continue
                 score = 0
             if kw:
-                score += 2 if kw in nl else -4
-            elif any(t in nl for t in ("coder", "uncens", "integrated")):
+                score += 2 if kw in cand else -4
+            elif any(t in cand for t in ("coder", "uncens", "integrated", "vision", "agentic")):
                 score -= 1  # plain variant: prefer un-suffixed/general builds
             if score > best_score:
                 best, best_score = name, score
