@@ -12,6 +12,7 @@ variant (3B default) handles deep reasoning / final answers.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +33,60 @@ PORTFOLIO_TAGS: Dict[str, str] = {
 
 class OllamaError(RuntimeError):
     pass
+
+
+_RESOLVE_CACHE: Dict[Tuple[str, str], str] = {}
+
+
+def resolve_model_tag(requested: str, host: Optional[str] = DEFAULT_HOST) -> str:
+    """Map a requested portfolio tag to a model that is actually installed.
+
+    Tolerates local renames (e.g. ``evolutionermk1-3B`` -> ``evolu-general-3B``)
+    by matching on size token (1.5B/2B/3B/5B) plus keyword (coder/general/
+    uncens/integrated). Returns ``requested`` unchanged when nothing matches
+    or the server is unreachable, so callers fail with their own error.
+    """
+    host = (host or DEFAULT_HOST).rstrip("/")
+    cache_key = (host, requested)
+    if cache_key in _RESOLVE_CACHE:
+        return _RESOLVE_CACHE[cache_key]
+    resolved = requested
+    try:
+        installed = list_installed(host)
+    except Exception:
+        installed = []
+    if requested in installed:
+        pass
+    elif installed:
+        base = requested.split(":")[0].lower()
+        size_m = re.search(r"(1\.5b|2b|3b|5b)$", base)
+        size = size_m.group(1) if size_m else None
+        kw = next((t for t in ("coder", "general", "uncens", "integrated") if t in base), None)
+        best, best_score = None, -1
+        for name in installed:
+            nl = name.split(":")[0].lower()
+            token = nl.rsplit("-", 1)[-1]  # e.g. "general-5b" -> "5b"
+            if size:
+                if token == size:
+                    score = 3  # exact variant token ("1.5b" never matches "5b")
+                elif nl.endswith(size) and not (size == "5b" and "1.5b" in nl):
+                    score = 1  # fuzzy suffix fallback
+                else:
+                    continue
+            else:
+                if token != base and not nl.endswith(base):
+                    continue
+                score = 0
+            if kw:
+                score += 2 if kw in nl else -4
+            elif any(t in nl for t in ("coder", "uncens", "integrated")):
+                score -= 1  # plain variant: prefer un-suffixed/general builds
+            if score > best_score:
+                best, best_score = name, score
+        if best:
+            resolved = best
+    _RESOLVE_CACHE[cache_key] = resolved
+    return resolved
 
 
 def ollama_ok(host: str = DEFAULT_HOST, timeout: float = 2.0, retries: int = 2) -> bool:
@@ -69,7 +124,8 @@ class OllamaBackend(BaseBackend):
         self.host = (host or os.environ.get(host_env) or DEFAULT_HOST).rstrip("/")
         if not self.host.startswith("http"):
             self.host = f"http://{self.host}"
-        self.name = f"ollama:{model}"
+        self.model = resolve_model_tag(model, self.host)
+        self.name = f"ollama:{self.model}"
 
     def generate(self, prompt: str, *, max_tokens: int = 256,
                  temperature: float = 0.7, stop: Tuple[str, ...] = ()) -> Tuple[str, Dict[str, Any]]:

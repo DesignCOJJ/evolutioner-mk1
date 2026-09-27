@@ -26,6 +26,14 @@ Pull your portfolio (already done on this machine):
 for v in 1.5B 2B 3B 5B; do ollama pull wallpillar-lm/evolutionermk1-$v:latest; done
 ```
 
+> **Local model names:** if your models were created locally with different
+> tags (e.g. `wallpillar-lm/evolu-general-3B` instead of
+> `evolutionermk1-3B`), everything still works — the backend resolves any
+> requested portfolio tag to the closest installed model automatically
+> (size token + variant keyword). `ollama pull` only works for tags that
+> exist on registry.ollama.ai; local GGUFs go through
+> `ollama create <name> -f Modelfile` (launcher menu 8 → 2).
+
 ---
 
 ## 1. The launcher (easiest way to run everything)

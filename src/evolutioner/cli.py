@@ -64,6 +64,141 @@ def _print_result(result) -> None:
     print("=" * 62)
 
 
+def _chat_repl(config: Config) -> int:
+    """opencode-style REPL: persistent session, streaming tokens, /commands.
+
+    Chat turns run the *model* directly (fast, conversational). `/solve <q>`
+    escalates a question to the full harness (MCTS + RLVR verification).
+    """
+    from .ollama_backend import OllamaBackend, PORTFOLIO_TAGS, ollama_ok
+    from .usage import UsageTracker
+
+    host = config.extra.get("ollama_host") or None
+    if not ollama_ok(host):
+        print("error: Ollama is not reachable. Start it with:  ollama serve", file=sys.stderr)
+        return 2
+
+    tag = PORTFOLIO_TAGS[config.variant]
+    llm = OllamaBackend(tag, host=host)
+    tracker = UsageTracker(config.usage_db)
+
+    CY = "\033[1;36m"; DIM = "\033[2m"; GRN = "\033[1;32m"; NC = "\033[0m"
+    history: List[dict] = []
+
+    def _stream(history_snapshot: List[dict], *, max_tokens: int) -> str:
+        payload = {
+            "model": llm.model,
+            "messages": history_snapshot,
+            "stream": True,
+            "options": {"num_predict": max_tokens, "temperature": config.temperature},
+        }
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"{llm.host}/api/chat", data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        chunks: List[str] = []
+        prompt_n = eval_n = 0
+        total_s = 0.0
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            for line in resp:
+                line = line.strip()
+                if not line:
+                    continue
+                ev = json.loads(line)
+                piece = (ev.get("message") or {}).get("content", "")
+                if piece:
+                    chunks.append(piece)
+                    print(piece, end="", flush=True)
+                if ev.get("done"):
+                    prompt_n = int(ev.get("prompt_eval_count", 0))
+                    eval_n = int(ev.get("eval_count", 0))
+                    total_s = round(ev.get("total_duration", 0) / 1e9, 2)
+                    print(f"{DIM}\n  [{eval_n} tok · {total_s}s · {eval_n / max(total_s, 0.01):.1f} tok/s]{NC}", flush=True)
+        tracker.record(kind="chat", model=llm.model,
+                       prompt_tokens=prompt_n, gen_tokens=eval_n,
+                       duration_s=total_s)
+        return "".join(chunks)
+
+    print(f"{CY}evolutioner chat{NC} {DIM}· {tag} · type /help for commands{NC}")
+    while True:
+        try:
+            line = input(f"{GRN}❯{NC} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not line:
+            continue
+        if line.startswith("/"):
+            cmd, _, arg = line.partition(" ")
+            if cmd in ("/exit", "/quit"):
+                break
+            if cmd == "/help":
+                print("  /help             this text")
+                print("  /new              clear conversation history")
+                print("  /model <v>        switch variant (1.5B/2B/3B/5B)")
+                print("  /solve <question> run the FULL harness: MCTS + sandbox verification")
+                print("  /exit             quit (ctrl-d also works)")
+                continue
+            if cmd == "/new":
+                history.clear()
+                print(f"{DIM}context cleared{NC}")
+                continue
+            if cmd == "/model":
+                arg = arg.strip().upper()
+                if arg in PORTFOLIO_TAGS:
+                    config.variant = arg
+                    tag = PORTFOLIO_TAGS[arg]
+                    llm = OllamaBackend(tag, host=host)
+                    print(f"{DIM}switched to {tag}{NC}")
+                else:
+                    print(f"{DIM}variants: {', '.join(PORTFOLIO_TAGS)}{NC}")
+                continue
+            if cmd == "/solve":
+                if not arg.strip():
+                    print(f"{DIM}usage: /solve <question>{NC}")
+                    continue
+                print(f"{DIM}harness: MCTS → answer → sandbox verify …{NC}")
+                from .context import VirtualContextEngine
+                from .harness import Harness
+                from .memory import MemoryStore
+                from .ollama_backend import build_ollama_backend
+                from .verifier import SandboxVerifier
+
+                harness = Harness(
+                    config, build_ollama_backend(config),
+                    tracker=tracker,
+                    context=VirtualContextEngine(config.rag_dir, top_k=config.rag_top_k) if config.enable_rag else None,
+                    memory=MemoryStore(config.memories_dir),
+                    verifier=SandboxVerifier(timeout_s=config.sandbox_timeout_s, use_bwrap=config.use_bwrap),
+                )
+                result = harness.run(arg.strip(), use_mcts=True, use_rag=config.enable_rag)
+                _print_result(result)
+                history.append({"role": "user", "content": arg.strip()})
+                history.append({"role": "assistant", "content": result.answer})
+                continue
+            print(f"{DIM}unknown command {cmd} — /help{NC}")
+            continue
+
+        history.append({"role": "user", "content": line})
+        print(f"{CY}◂{NC} ", end="", flush=True)
+        try:
+            reply = _stream(history, max_tokens=config.gen_tokens)
+        except Exception as exc:  # keep the REPL alive on network hiccups
+            print(f"\n{DIM}error: {exc}{NC}")
+            history.pop()
+            continue
+        if not reply.strip():
+            print(f"{DIM}(empty response — model may still be loading; retry){NC}")
+            history.pop()
+            continue
+        history.append({"role": "assistant", "content": reply})
+
+    tracker.close()
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="evolutioner",
@@ -84,6 +219,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     q.add_argument("--gen", type=int, help="max answer tokens override")
     q.add_argument("--variant", choices=tuple(VARIANTS), help="portfolio variant override")
 
+    sub.add_parser("chat", help="opencode-style REPL chat with the portfolio (streaming)")
     sub.add_parser("selftest", help="run built-in mock-backend selftest (no model needed)")
     sub.add_parser("models", help="list official wallpillar-lm variants")
     sub.add_parser("usage", help="show usage statistics")
@@ -154,8 +290,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         tracker.close()
         return 0
 
+    if args.cmd == "chat":
+        return _chat_repl(config)
+
     if args.cmd == "status":
-        from .ollama_backend import PORTFOLIO_TAGS, list_installed, ollama_ok
+        from .ollama_backend import PORTFOLIO_TAGS, list_installed, ollama_ok, resolve_model_tag
 
         host = config.extra.get("ollama_host") or None
         if not ollama_ok(host):
@@ -166,7 +305,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("Portfolio models installed:")
         for key, tag in PORTFOLIO_TAGS.items():
             marker = "*" if key == config.variant else " "
-            state = "installed" if tag in installed else "MISSING (ollama pull " + tag + ")"
+            resolved = resolve_model_tag(tag, host)
+            if resolved in installed:
+                state = "installed" if resolved == tag else f"installed as {resolved}"
+            else:
+                state = "missing locally (import GGUF: launcher menu 8 → 2)"
             print(f" {marker} {key:<5} {tag:<45} {state}")
         others = installed - set(PORTFOLIO_TAGS.values())
         if others:
